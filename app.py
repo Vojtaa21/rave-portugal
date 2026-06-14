@@ -679,37 +679,7 @@ with st.sidebar:
     search = st.button("SEARCH EVENTS")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Zobraz cache — jaká města a ID jsou uložena
-    if st.session_state.city_cache:
-        st.markdown("""
-        <div style="margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
-          <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;margin-bottom:8px;">CACHED CITY IDs</div>
-        """, unsafe_allow_html=True)
-        for cname, ids in st.session_state.city_cache.items():
-            ra  = ids.get("ra_id") or "—"
-            sk  = ids.get("sk_id") or "—"
-            st.markdown(f"""
-            <div style="font-family:'Space Mono',monospace;font-size:9px;color:#444;line-height:2;">
-              <span style="color:#888;">{cname}</span><br>
-              <span style="color:#d4ff00;">■</span> RA: {ra} &nbsp;
-              <span style="color:#00e5ff;">■</span> SK: {sk}
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("""
-    <div style="margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
-      <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;line-height:2.5;">
-        DATA SOURCES<br>
-        <span style="color:#d4ff00;">■</span> Resident Advisor<br>
-        <span style="color:#00e5ff;">■</span> Songkick<br>
-        <span style="color:#ff7f00;">■</span> Bandsintown<br>
-        <span style="color:#bf5fff;">■</span> Dice.fm<br>
-        <span style="color:#ff2d55;">■</span> Shotgun.live<br>
-        <span style="color:#026cdf;">■</span> Ticketmaster*
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════
