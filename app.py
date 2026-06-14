@@ -275,6 +275,14 @@ def genre_matches(row: dict, selected: list[str]) -> bool:
     return any(s.lower() in text for s in selected)
 
 
+def artist_matches(row: dict, query: str) -> bool:
+    if not query.strip():
+        return True
+    q = query.strip().lower()
+    return (q in row["artists"].lower() or
+            q in row["title"].lower())
+
+
 def deduplicate(rows: list[dict]) -> list[dict]:
     seen = set()
     result = []
@@ -397,6 +405,11 @@ with st.sidebar:
         "Genres", options=GENRES,
         default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "Gabber", "Frenchcore"],
         placeholder="All genres",
+    )
+
+    artist_filter = st.text_input(
+        "Artist",
+        placeholder="e.g. Klangkuenstler, Paula Temple…",
     )
 
     st.markdown('<div class="search-btn">', unsafe_allow_html=True)
@@ -556,7 +569,8 @@ if search:
                     st.markdown('<div style="font-family:Space Mono,monospace;font-size:9px;color:#333;">■ Songkick — city not found</div>', unsafe_allow_html=True)
 
             all_rows = deduplicate(all_rows)
-            filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
+            filtered = [r for r in all_rows
+                        if genre_matches(r, genres_sel) and artist_matches(r, artist_filter)]
             filtered.sort(key=lambda x: x["date"])
             st.session_state.results = filtered
 
