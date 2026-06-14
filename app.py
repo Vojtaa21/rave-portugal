@@ -7,15 +7,12 @@ import json
 import hashlib
 
 # ═══════════════════════════════════════════════════════════════
-#  CONFIG
+#  CONFIG — přidej libovolné město, ID se zjistí automaticky
 # ═══════════════════════════════════════════════════════════════
 
-CITIES = {
-    "Porto":   {"ra_area_id": 364, "sk_city_slug": "porto"},
-    "Lisbon":  {"ra_area_id": 53,  "sk_city_slug": "lisbon"},
-    "Prague":  {"ra_area_id": 451, "sk_city_slug": "prague"},
-    "Brno":    {"ra_area_id": 676, "sk_city_slug": "brno"},
-}
+CITIES_LIST = [
+    "Porto", "Lisbon", "Prague", "Brno",
+]
 
 GENRES = [
     "Techno", "Acid Techno", "Hard Techno", "Industrial Techno",
@@ -54,6 +51,15 @@ query GET_DEFAULT_EVENTS_OVERVIEW($filters: FilterInputDtoInput, $pageSize: Int,
 }
 """
 
+RA_AREAS_QUERY = """
+query FindArea($search: String!) {
+  areas(searchTerm: $search, limit: 10) {
+    id name urlName
+    country { name isoCode }
+  }
+}
+"""
+
 # ═══════════════════════════════════════════════════════════════
 #  SESSION STATE
 # ═══════════════════════════════════════════════════════════════
@@ -62,23 +68,92 @@ if "favorites" not in st.session_state:
     st.session_state.favorites = {}
 if "results" not in st.session_state:
     st.session_state.results = []
+if "city_cache" not in st.session_state:
+    # Cache pro zjištěné IDs: {"Porto": {"ra_id": 364, "sk_id": 28758}}
+    st.session_state.city_cache = {}
 
 
 def event_id(r: dict) -> str:
     return hashlib.md5(f"{r['date']}_{r['title']}".encode()).hexdigest()[:10]
 
-
 def is_favorite(r: dict) -> bool:
     return event_id(r) in st.session_state.favorites
-
 
 def add_favorite(eid: str, r: dict):
     st.session_state.favorites[eid] = r
 
-
 def remove_favorite(eid: str):
     if eid in st.session_state.favorites:
         del st.session_state.favorites[eid]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  AUTO-LOOKUP FUNKCÍ PRO ID MĚST
+# ═══════════════════════════════════════════════════════════════
+
+def lookup_ra_area_id(city_name: str) -> int | None:
+    """Zjistí RA area ID pro dané město přes GraphQL API."""
+    try:
+        r = requests.post(
+            RA_URL,
+            headers=RA_HEADERS,
+            json={"query": RA_AREAS_QUERY, "variables": {"search": city_name.lower()}},
+            timeout=10,
+        )
+        r.raise_for_status()
+        areas = r.json().get("data", {}).get("areas", [])
+        if not areas:
+            return None
+        # Preferuj přesnou shodu názvu
+        for a in areas:
+            if a.get("name", "").lower() == city_name.lower():
+                return int(a["id"])
+        # Jinak první výsledek
+        return int(areas[0]["id"])
+    except Exception:
+        return None
+
+
+def lookup_sk_metro_id(city_name: str) -> int | None:
+    """Zjistí Songkick metro area ID přes jejich location search API."""
+    try:
+        url = f"https://api.songkick.com/api/3.0/search/locations.json?query={city_name}&apikey=demo"
+        # Songkick location search je dostupný i přes web search endpoint
+        # Alternativa: scraping jejich stránky
+        r = requests.get(
+            f"https://www.songkick.com/search?utf8=%E2%9C%93&type=locations&query={city_name}",
+            headers=SK_HEADERS,
+            timeout=10,
+        )
+        soup = BeautifulSoup(r.text, "html.parser")
+        # Hledej odkaz na metro area
+        for a in soup.select("a[href*='/metro_areas/']"):
+            href = a.get("href", "")
+            parts = href.split("/metro_areas/")
+            if len(parts) == 2:
+                mid = parts[1].split("-")[0]
+                if mid.isdigit():
+                    return int(mid)
+        return None
+    except Exception:
+        return None
+
+
+def get_city_ids(city_name: str) -> dict:
+    """
+    Vrátí {ra_id, sk_id} pro město.
+    Výsledky cachuje v session_state aby se API nevolalo opakovaně.
+    """
+    cache = st.session_state.city_cache
+    if city_name in cache:
+        return cache[city_name]
+
+    ra_id = lookup_ra_area_id(city_name)
+    sk_id = lookup_sk_metro_id(city_name)
+
+    result = {"ra_id": ra_id, "sk_id": sk_id}
+    cache[city_name] = result
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,11 +208,10 @@ def parse_ra(events: list[dict]) -> list[dict]:
     return rows
 
 
-SK_METRO = {"porto": 28758, "lisbon": 28863, "prague": 31302, "brno": 31303}
-
-def fetch_songkick(city_slug: str, date_from: date, date_to: date) -> list[dict]:
+def fetch_songkick(metro_id: int, date_from: date, date_to: date) -> list[dict]:
+    if not metro_id:
+        return []
     rows = []
-    metro_id = SK_METRO.get(city_slug, 28758)
     page = 1
     while page <= 5:
         url = (
@@ -225,24 +299,16 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif !important; }
 .stApp { background: #0a0a0a !important; }
 .stApp > header { background: transparent !important; }
-section[data-testid="stSidebar"] {
-    background: #0f0f0f !important;
-    border-right: 0.5px solid #1d1d1d !important;
-}
+section[data-testid="stSidebar"] { background: #0f0f0f !important; border-right: 0.5px solid #1d1d1d !important; }
 section[data-testid="stSidebar"] label {
-    color: #555 !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 10px !important;
-    letter-spacing: 2px !important;
-    text-transform: uppercase !important;
+    color: #555 !important; font-family: 'Space Mono', monospace !important;
+    font-size: 10px !important; letter-spacing: 2px !important; text-transform: uppercase !important;
 }
 section[data-testid="stSidebar"] .stSelectbox > div > div,
 section[data-testid="stSidebar"] .stMultiSelect > div > div,
 section[data-testid="stSidebar"] .stDateInput > div > div > input {
-    background: #151515 !important;
-    border: 0.5px solid #2a2a2a !important;
-    color: #ccc !important;
-    border-radius: 6px !important;
+    background: #151515 !important; border: 0.5px solid #2a2a2a !important;
+    color: #ccc !important; border-radius: 6px !important;
 }
 section[data-testid="stSidebar"] .stMultiSelect span[data-baseweb="tag"] {
     background: #1a1e00 !important; color: #d4ff00 !important;
@@ -254,19 +320,15 @@ div.stButton > button {
     font-family: 'Space Mono', monospace !important; font-size: 10px !important;
     letter-spacing: 1px !important; border: 0.5px solid #2a2a2a !important;
     border-radius: 6px !important; padding: 0.3rem 1rem !important;
-    width: 100% !important; margin-top: 2px !important; transition: all 0.15s !important;
+    width: 100% !important; margin-top: 2px !important;
 }
 div.stButton > button:hover { border-color: #ff3cac !important; color: #ff3cac !important; }
-div[data-testid="stButton-search"] > button,
-button[kind="primary"] {
-    background: #d4ff00 !important; color: #0a0a0a !important;
-    border: none !important;
-}
 .search-btn > div > button {
     background: #d4ff00 !important; color: #0a0a0a !important;
     font-weight: 700 !important; font-size: 11px !important;
     letter-spacing: 2px !important; border: none !important;
 }
+.search-btn > div > button:hover { background: #c0e800 !important; color: #0a0a0a !important; }
 .block-container { padding-top: 2rem !important; }
 div.stDownloadButton > button {
     background: transparent !important; border: 0.5px solid #2a2a2a !important;
@@ -292,10 +354,10 @@ st.markdown(f"""
       UNDERGROUND ELECTRONIC MUSIC
     </div>
     <div style="font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;color:#f0f0f0;letter-spacing:-1.5px;line-height:1;">
-      RAVE <span style="color:#d4ff00;">PORTUGAL</span>
+      RAVE <span style="color:#d4ff00;">FINDER</span>
     </div>
     <div style="font-family:'Space Mono',monospace;font-size:11px;color:#444;margin-top:6px;letter-spacing:1px;">
-      Resident Advisor + Songkick — Porto & Lisbon
+      Resident Advisor + Songkick — auto city lookup
     </div>
   </div>
   <div style="font-family:'Space Mono',monospace;font-size:10px;color:#555;text-align:right;">
@@ -317,14 +379,22 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    city = st.selectbox("City", options=list(CITIES.keys()))
+    # Dropdown + možnost přidat vlastní město
+    city_options = CITIES_LIST + ["+ Add city…"]
+    city_select = st.selectbox("City", options=city_options)
+
+    if city_select == "+ Add city…":
+        custom_city = st.text_input("Enter city name", placeholder="e.g. Berlin, Amsterdam…")
+        city = custom_city.strip() if custom_city.strip() else None
+    else:
+        city = city_select
+
     c1, c2 = st.columns(2)
     with c1: date_from = st.date_input("From", value=date.today())
     with c2: date_to   = st.date_input("To",   value=date.today() + timedelta(days=30))
 
     genres_sel = st.multiselect(
-        "Genres",
-        options=GENRES,
+        "Genres", options=GENRES,
         default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "Gabber", "Frenchcore"],
         placeholder="All genres",
     )
@@ -333,8 +403,26 @@ with st.sidebar:
     search = st.button("SEARCH EVENTS")
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # Zobraz cache — jaká města a ID jsou uložena
+    if st.session_state.city_cache:
+        st.markdown("""
+        <div style="margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
+          <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;margin-bottom:8px;">CACHED CITY IDs</div>
+        """, unsafe_allow_html=True)
+        for cname, ids in st.session_state.city_cache.items():
+            ra  = ids.get("ra_id") or "—"
+            sk  = ids.get("sk_id") or "—"
+            st.markdown(f"""
+            <div style="font-family:'Space Mono',monospace;font-size:9px;color:#444;line-height:2;">
+              <span style="color:#888;">{cname}</span><br>
+              <span style="color:#d4ff00;">■</span> RA: {ra} &nbsp;
+              <span style="color:#00e5ff;">■</span> SK: {sk}
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("""
-    <div style="margin-top:2rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
+    <div style="margin-top:1.5rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
       <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;line-height:2.5;">
         DATA SOURCES<br>
         <span style="color:#d4ff00;">■</span> Resident Advisor<br>
@@ -345,16 +433,16 @@ with st.sidebar:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  EVENT CARD RENDERER
+#  EVENT CARD
 # ═══════════════════════════════════════════════════════════════
 
 def render_card(r: dict, key_prefix: str):
-    eid      = event_id(r)
-    fav      = is_favorite(r)
-    accent   = "#d4ff00" if r["source"] == "RA" else "#00e5ff"
-    acc_bg   = "#1a1e00" if r["source"] == "RA" else "#001a1e"
-    acc_brd  = "#3a4400" if r["source"] == "RA" else "#003040"
-    heart_c  = "#ff3cac" if fav else "#2a2a2a"
+    eid     = event_id(r)
+    fav     = is_favorite(r)
+    accent  = "#d4ff00" if r["source"] == "RA" else "#00e5ff"
+    acc_bg  = "#1a1e00" if r["source"] == "RA" else "#001a1e"
+    acc_brd = "#3a4400" if r["source"] == "RA" else "#003040"
+    heart_c = "#ff3cac" if fav else "#2a2a2a"
 
     tags_html = ""
     for g in r["genres"].split(", ")[:3]:
@@ -409,7 +497,6 @@ def render_card(r: dict, key_prefix: str):
     </div>
     """, unsafe_allow_html=True)
 
-    # Favorite button — plain st.button with on_click callback
     btn_label = "♥  Remove from favorites" if fav else "♡  Save to favorites"
 
     def _toggle(eid=eid, r=r, fav=fav):
@@ -423,33 +510,56 @@ def render_card(r: dict, key_prefix: str):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  SEARCH LOGIC
+#  SEARCH
 # ═══════════════════════════════════════════════════════════════
 
 if search:
-    if date_from > date_to:
+    if not city:
+        st.warning("Please enter a city name.")
+    elif date_from > date_to:
         st.error("'From' date must be before 'To' date.")
     else:
-        cfg = CITIES[city]
-        all_rows = []
+        # Auto-lookup IDs
+        with st.spinner(f"Looking up city IDs for {city}…"):
+            ids = get_city_ids(city)
 
-        col_ra, col_sk = st.columns(2)
-        with col_ra:
-            with st.spinner("Resident Advisor…"):
-                ra_rows = parse_ra(fetch_ra(cfg["ra_area_id"], date_from, date_to))
-                all_rows.extend(ra_rows)
-            st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)} events</div>', unsafe_allow_html=True)
+        ra_id = ids.get("ra_id")
+        sk_id = ids.get("sk_id")
 
-        with col_sk:
-            with st.spinner("Songkick…"):
-                sk_rows = fetch_songkick(cfg["sk_city_slug"], date_from, date_to)
-                all_rows.extend(sk_rows)
-            st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)} events</div>', unsafe_allow_html=True)
+        if not ra_id and not sk_id:
+            st.error(f"Could not find '{city}' in RA or Songkick. Try a different spelling.")
+        else:
+            id_info = []
+            if ra_id: id_info.append(f"RA: {ra_id}")
+            if sk_id: id_info.append(f"Songkick: {sk_id}")
+            st.caption(f"City IDs — {' · '.join(id_info)}")
 
-        all_rows = deduplicate(all_rows)
-        filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
-        filtered.sort(key=lambda x: x["date"])
-        st.session_state.results = filtered
+            all_rows = []
+            col_ra, col_sk = st.columns(2)
+
+            with col_ra:
+                if ra_id:
+                    with st.spinner("Resident Advisor…"):
+                        ra_rows = parse_ra(fetch_ra(ra_id, date_from, date_to))
+                        all_rows.extend(ra_rows)
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)} events</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="font-family:Space Mono,monospace;font-size:9px;color:#333;">■ RA — city not found</div>', unsafe_allow_html=True)
+
+            with col_sk:
+                if sk_id:
+                    with st.spinner("Songkick…"):
+                        sk_rows = fetch_songkick(sk_id, date_from, date_to)
+                        all_rows.extend(sk_rows)
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)} events</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="font-family:Space Mono,monospace;font-size:9px;color:#333;">■ Songkick — city not found</div>', unsafe_allow_html=True)
+
+            all_rows = deduplicate(all_rows)
+            filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
+            filtered.sort(key=lambda x: x["date"])
+            st.session_state.results = filtered
+
 
 # ═══════════════════════════════════════════════════════════════
 #  TABS
@@ -461,7 +571,6 @@ tab_search, tab_fav = st.tabs([
     f"♥  Saved ({fav_count})",
 ])
 
-# ── Tab 1: Results ───────────────────────────────────────────
 with tab_search:
     results = st.session_state.results
     if not results:
@@ -477,7 +586,7 @@ with tab_search:
         st.markdown(f"""
         <div style="font-family:'Space Mono',monospace;font-size:10px;color:#555;letter-spacing:2px;
                     margin:1rem 0;padding-bottom:1rem;border-bottom:0.5px solid #1d1d1d;">
-            {len(results)} EVENTS FOUND — {city.upper()} — {date_from.strftime("%d %b")} → {date_to.strftime("%d %b %Y")}
+            {len(results)} EVENTS FOUND — {date_from.strftime("%d %b")} → {date_to.strftime("%d %b %Y")}
         </div>
         """, unsafe_allow_html=True)
 
@@ -487,19 +596,16 @@ with tab_search:
         df_exp = pd.DataFrame(results)
         csv = df_exp.to_csv(index=False).encode("utf-8")
         st.download_button("EXPORT CSV", csv,
-            file_name=f"rave_{city.lower()}_{date_from}.csv", mime="text/csv")
+            file_name=f"rave_events_{date_from}.csv", mime="text/csv")
 
-# ── Tab 2: Favorites ─────────────────────────────────────────
 with tab_fav:
     favs = list(st.session_state.favorites.values())
-
     if not favs:
         st.markdown("""
         <div style="padding:4rem 0;text-align:center;">
           <div style="font-family:'Space Mono',monospace;font-size:48px;color:#1a1a1a;margin-bottom:1rem;">♥</div>
           <div style="font-family:'Space Mono',monospace;font-size:11px;color:#333;letter-spacing:2px;line-height:2.5;">
-            NO SAVED EVENTS YET<br>
-            CLICK ♡ ON ANY EVENT TO SAVE IT
+            NO SAVED EVENTS YET<br>CLICK ♡ ON ANY EVENT TO SAVE IT
           </div>
         </div>
         """, unsafe_allow_html=True)
