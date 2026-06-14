@@ -7,15 +7,15 @@ import json
 import hashlib
 
 # ═══════════════════════════════════════════════════════════════
-#  KONFIGURACE
+#  CONFIG
 # ═══════════════════════════════════════════════════════════════
 
-MESTA = {
+CITIES = {
     "Porto":   {"ra_area_id": 364, "sk_city_slug": "porto"},
-    "Lisabon": {"ra_area_id": 53,  "sk_city_slug": "lisbon"},
+    "Lisbon":  {"ra_area_id": 53,  "sk_city_slug": "lisbon"},
 }
 
-ZANRY_MOZNOSTI = [
+GENRES = [
     "Techno", "Acid Techno", "Hard Techno", "Industrial Techno",
     "Drum & Bass", "Jump Up", "Liquid Funk", "Neurofunk",
     "Trance", "Psytrance", "Uplifting Trance",
@@ -53,34 +53,34 @@ query GET_DEFAULT_EVENTS_OVERVIEW($filters: FilterInputDtoInput, $pageSize: Int,
 """
 
 # ═══════════════════════════════════════════════════════════════
-#  SESSION STATE — oblíbené
+#  SESSION STATE
 # ═══════════════════════════════════════════════════════════════
 
-if "oblibene" not in st.session_state:
-    st.session_state.oblibene = {}   # {event_id: event_dict}
-if "aktivni_tab" not in st.session_state:
-    st.session_state.aktivni_tab = "hledat"
+if "favorites" not in st.session_state:
+    st.session_state.favorites = {}
+if "results" not in st.session_state:
+    st.session_state.results = []
 
 
 def event_id(r: dict) -> str:
-    """Unikátní ID akce z data + názvu."""
-    return hashlib.md5(f"{r['datum']}_{r['nazev']}".encode()).hexdigest()[:10]
+    return hashlib.md5(f"{r['date']}_{r['title']}".encode()).hexdigest()[:10]
 
 
-def je_oblibena(r: dict) -> bool:
-    return event_id(r) in st.session_state.oblibene
+def is_favorite(r: dict) -> bool:
+    return event_id(r) in st.session_state.favorites
 
 
-def toggleOblibena(r: dict):
-    eid = event_id(r)
-    if eid in st.session_state.oblibene:
-        del st.session_state.oblibene[eid]
-    else:
-        st.session_state.oblibene[eid] = r
+def add_favorite(eid: str, r: dict):
+    st.session_state.favorites[eid] = r
+
+
+def remove_favorite(eid: str):
+    if eid in st.session_state.favorites:
+        del st.session_state.favorites[eid]
 
 
 # ═══════════════════════════════════════════════════════════════
-#  DATOVÉ FUNKCE
+#  DATA FUNCTIONS
 # ═══════════════════════════════════════════════════════════════
 
 def fetch_ra(area_id: int, date_from: date, date_to: date) -> list[dict]:
@@ -114,19 +114,19 @@ def parse_ra(events: list[dict]) -> list[dict]:
     rows = []
     for e in events:
         genres = [g["name"] for g in e.get("genres", [])]
-        datum = (e.get("date") or "")[:10]
+        d = (e.get("date") or "")[:10]
         cas_raw = e.get("startTime", "")
-        cas = cas_raw.split("T")[1][:5] if cas_raw and "T" in cas_raw else "—"
+        time = cas_raw.split("T")[1][:5] if cas_raw and "T" in cas_raw else "—"
         venue = e.get("venue") or {}
         rows.append({
-            "datum":      datum,
-            "cas":        cas,
-            "nazev":      e.get("title", "—"),
-            "venue":      venue.get("name", "—"),
-            "interpreti": ", ".join(a["name"] for a in e.get("artists", [])) or "—",
-            "zanry":      ", ".join(genres) if genres else "",
-            "zdroj":      "RA",
-            "odkaz":      f"https://ra.co{e['contentUrl']}" if e.get("contentUrl") else "",
+            "date":    d,
+            "time":    time,
+            "title":   e.get("title", "—"),
+            "venue":   venue.get("name", "—"),
+            "artists": ", ".join(a["name"] for a in e.get("artists", [])) or "—",
+            "genres":  ", ".join(genres) if genres else "",
+            "source":  "RA",
+            "url":     f"https://ra.co{e['contentUrl']}" if e.get("contentUrl") else "",
         })
     return rows
 
@@ -159,9 +159,9 @@ def fetch_songkick(city_slug: str, date_from: date, date_to: date) -> list[dict]
                             continue
                         found = True
                         start = item.get("startDate", "")
-                        datum = start[:10] if start else "—"
-                        cas = start[11:16] if len(start) > 10 else "—"
-                        ev_date = date.fromisoformat(datum) if datum != "—" else None
+                        d = start[:10] if start else "—"
+                        t = start[11:16] if len(start) > 10 else "—"
+                        ev_date = date.fromisoformat(d) if d != "—" else None
                         if ev_date and not (date_from <= ev_date <= date_to):
                             continue
                         location = item.get("location", {})
@@ -169,16 +169,16 @@ def fetch_songkick(city_slug: str, date_from: date, date_to: date) -> list[dict]
                         performers = item.get("performer", [])
                         if isinstance(performers, dict):
                             performers = [performers]
-                        interpreti = ", ".join(p.get("name", "") for p in performers) or "—"
+                        artists = ", ".join(p.get("name", "") for p in performers) or "—"
                         rows.append({
-                            "datum":      datum,
-                            "cas":        cas,
-                            "nazev":      item.get("name", "—"),
-                            "venue":      venue_name,
-                            "interpreti": interpreti,
-                            "zanry":      "",
-                            "zdroj":      "Songkick",
-                            "odkaz":      item.get("url", ""),
+                            "date":    d,
+                            "time":    t,
+                            "title":   item.get("name", "—"),
+                            "venue":   venue_name,
+                            "artists": artists,
+                            "genres":  "",
+                            "source":  "Songkick",
+                            "url":     item.get("url", ""),
                         })
                 except Exception:
                     continue
@@ -195,7 +195,7 @@ def fetch_songkick(city_slug: str, date_from: date, date_to: date) -> list[dict]
 def genre_matches(row: dict, selected: list[str]) -> bool:
     if not selected:
         return True
-    text = f"{row['zanry']} {row['interpreti']} {row['nazev']}".lower()
+    text = f"{row['genres']} {row['artists']} {row['title']}".lower()
     return any(s.lower() in text for s in selected)
 
 
@@ -203,7 +203,7 @@ def deduplicate(rows: list[dict]) -> list[dict]:
     seen = set()
     result = []
     for r in rows:
-        key = (r["datum"], r["nazev"].lower()[:40])
+        key = (r["date"], r["title"].lower()[:40])
         if key not in seen:
             seen.add(key)
             result.append(r)
@@ -211,7 +211,7 @@ def deduplicate(rows: list[dict]) -> list[dict]:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  DESIGN SYSTÉM
+#  PAGE CONFIG & CSS
 # ═══════════════════════════════════════════════════════════════
 
 st.set_page_config(page_title="Rave Portugal", page_icon="🎛️", layout="wide")
@@ -227,9 +227,7 @@ section[data-testid="stSidebar"] {
     background: #0f0f0f !important;
     border-right: 0.5px solid #1d1d1d !important;
 }
-section[data-testid="stSidebar"] .stSelectbox label,
-section[data-testid="stSidebar"] .stMultiSelect label,
-section[data-testid="stSidebar"] .stDateInput label {
+section[data-testid="stSidebar"] label {
     color: #555 !important;
     font-family: 'Space Mono', monospace !important;
     font-size: 10px !important;
@@ -245,53 +243,48 @@ section[data-testid="stSidebar"] .stDateInput > div > div > input {
     border-radius: 6px !important;
 }
 section[data-testid="stSidebar"] .stMultiSelect span[data-baseweb="tag"] {
-    background: #1a1e00 !important;
-    color: #d4ff00 !important;
-    border: 0.5px solid #3a4400 !important;
-    border-radius: 4px !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 10px !important;
+    background: #1a1e00 !important; color: #d4ff00 !important;
+    border: 0.5px solid #3a4400 !important; border-radius: 4px !important;
+    font-family: 'Space Mono', monospace !important; font-size: 10px !important;
 }
 div.stButton > button {
-    background: #d4ff00 !important;
-    color: #0a0a0a !important;
-    font-family: 'Space Mono', monospace !important;
-    font-weight: 700 !important;
-    font-size: 11px !important;
-    letter-spacing: 2px !important;
+    background: #1a1a1a !important; color: #888 !important;
+    font-family: 'Space Mono', monospace !important; font-size: 10px !important;
+    letter-spacing: 1px !important; border: 0.5px solid #2a2a2a !important;
+    border-radius: 6px !important; padding: 0.3rem 1rem !important;
+    width: 100% !important; margin-top: 2px !important; transition: all 0.15s !important;
+}
+div.stButton > button:hover { border-color: #ff3cac !important; color: #ff3cac !important; }
+div[data-testid="stButton-search"] > button,
+button[kind="primary"] {
+    background: #d4ff00 !important; color: #0a0a0a !important;
     border: none !important;
-    border-radius: 6px !important;
-    padding: 0.6rem 1.5rem !important;
-    width: 100% !important;
-    margin-top: 4px !important;
 }
-div.stButton > button:hover { background: #c0e800 !important; }
+.search-btn > div > button {
+    background: #d4ff00 !important; color: #0a0a0a !important;
+    font-weight: 700 !important; font-size: 11px !important;
+    letter-spacing: 2px !important; border: none !important;
+}
 .block-container { padding-top: 2rem !important; }
-div[data-testid="stAlert"] {
-    background: #111 !important;
-    border: 0.5px solid #2a2a2a !important;
-    border-radius: 6px !important;
-}
-details { background: #111 !important; border: 0.5px solid #1d1d1d !important; border-radius: 6px !important; }
-details summary { color: #555 !important; font-family: 'Space Mono', monospace !important; font-size: 11px !important; }
-details a { color: #d4ff00 !important; }
 div.stDownloadButton > button {
-    background: transparent !important;
-    border: 0.5px solid #2a2a2a !important;
-    color: #555 !important;
-    font-family: 'Space Mono', monospace !important;
-    font-size: 10px !important;
-    letter-spacing: 1px !important;
-    border-radius: 6px !important;
+    background: transparent !important; border: 0.5px solid #2a2a2a !important;
+    color: #555 !important; font-family: 'Space Mono', monospace !important;
+    font-size: 10px !important; letter-spacing: 1px !important; border-radius: 6px !important;
 }
 div.stDownloadButton > button:hover { border-color: #d4ff00 !important; color: #d4ff00 !important; }
+.stTabs [data-baseweb="tab-list"] { background: transparent !important; border-bottom: 0.5px solid #1d1d1d !important; }
+.stTabs [data-baseweb="tab"] { background: transparent !important; color: #444 !important; font-family: 'Space Mono', monospace !important; font-size: 11px !important; letter-spacing: 1px !important; }
+.stTabs [aria-selected="true"] { color: #d4ff00 !important; border-bottom: 2px solid #d4ff00 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Hero ────────────────────────────────────────────────────
-pocet_obl = len(st.session_state.oblibene)
+# ═══════════════════════════════════════════════════════════════
+#  HERO
+# ═══════════════════════════════════════════════════════════════
+
+fav_count = len(st.session_state.favorites)
 st.markdown(f"""
-<div style="margin-bottom:2rem; display:flex; justify-content:space-between; align-items:flex-end;">
+<div style="margin-bottom:2rem;display:flex;justify-content:space-between;align-items:flex-end;">
   <div>
     <div style="font-family:'Space Mono',monospace;font-size:10px;color:#d4ff00;letter-spacing:3px;margin-bottom:6px;">
       UNDERGROUND ELECTRONIC MUSIC
@@ -300,41 +293,48 @@ st.markdown(f"""
       RAVE <span style="color:#d4ff00;">PORTUGAL</span>
     </div>
     <div style="font-family:'Space Mono',monospace;font-size:11px;color:#444;margin-top:6px;letter-spacing:1px;">
-      Resident Advisor + Songkick
+      Resident Advisor + Songkick — Porto & Lisbon
     </div>
   </div>
   <div style="font-family:'Space Mono',monospace;font-size:10px;color:#555;text-align:right;">
-    <span style="color:#ff3cac;font-size:16px;">♥</span><br>
-    {pocet_obl} oblíbených
+    <span style="color:#ff3cac;font-size:20px;">♥</span><br>
+    {fav_count} saved
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ─── Sidebar ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  SIDEBAR
+# ═══════════════════════════════════════════════════════════════
+
 with st.sidebar:
     st.markdown("""
     <div style="font-family:'Space Mono',monospace;font-size:11px;color:#d4ff00;
                 letter-spacing:3px;padding:1rem 0 1.5rem;border-bottom:0.5px solid #1d1d1d;margin-bottom:1.5rem;">
-        FILTRY
+        FILTERS
     </div>
     """, unsafe_allow_html=True)
 
-    mesto = st.selectbox("Město", options=list(MESTA.keys()))
+    city = st.selectbox("City", options=list(CITIES.keys()))
     c1, c2 = st.columns(2)
-    with c1: datum_od = st.date_input("Od", value=date.today())
-    with c2: datum_do = st.date_input("Do", value=date.today() + timedelta(days=30))
-    zanry = st.multiselect(
-        "Žánry",
-        options=ZANRY_MOZNOSTI,
+    with c1: date_from = st.date_input("From", value=date.today())
+    with c2: date_to   = st.date_input("To",   value=date.today() + timedelta(days=30))
+
+    genres_sel = st.multiselect(
+        "Genres",
+        options=GENRES,
         default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "Gabber", "Frenchcore"],
-        placeholder="Vše (bez filtru)",
+        placeholder="All genres",
     )
-    hledat = st.button("VYHLEDAT AKCE")
+
+    st.markdown('<div class="search-btn">', unsafe_allow_html=True)
+    search = st.button("SEARCH EVENTS")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("""
     <div style="margin-top:2rem;padding-top:1rem;border-top:0.5px solid #1d1d1d;">
       <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;line-height:2.5;">
-        ZDROJE DAT<br>
+        DATA SOURCES<br>
         <span style="color:#d4ff00;">■</span> Resident Advisor<br>
         <span style="color:#00e5ff;">■</span> Songkick
       </div>
@@ -342,152 +342,182 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# ─── Karta akce ──────────────────────────────────────────────
-def render_event_card(r: dict, show_remove: bool = False):
-    eid = event_id(r)
-    oblibena = je_oblibena(r)
-    accent   = "#d4ff00" if r["zdroj"] == "RA" else "#00e5ff"
-    acc_bg   = "#1a1e00" if r["zdroj"] == "RA" else "#001a1e"
-    acc_brd  = "#3a4400" if r["zdroj"] == "RA" else "#003040"
-    heart_color = "#ff3cac" if oblibena else "#2a2a2a"
+# ═══════════════════════════════════════════════════════════════
+#  EVENT CARD RENDERER
+# ═══════════════════════════════════════════════════════════════
 
-    zanry_tags = ""
-    for z in r["zanry"].split(", ")[:3]:
-        if z.strip():
-            zanry_tags += f'<span style="font-family:Space Mono,monospace;font-size:9px;padding:2px 7px;border-radius:3px;background:{acc_bg};color:{accent};border:0.5px solid {acc_brd};margin-right:4px;">{z.strip().upper()}</span>'
+def render_card(r: dict, key_prefix: str):
+    eid      = event_id(r)
+    fav      = is_favorite(r)
+    accent   = "#d4ff00" if r["source"] == "RA" else "#00e5ff"
+    acc_bg   = "#1a1e00" if r["source"] == "RA" else "#001a1e"
+    acc_brd  = "#3a4400" if r["source"] == "RA" else "#003040"
+    heart_c  = "#ff3cac" if fav else "#2a2a2a"
 
-    odkaz_html = ""
-    if r["odkaz"]:
-        odkaz_html = f'<a href="{r["odkaz"]}" target="_blank" style="font-family:Space Mono,monospace;font-size:9px;color:#444;text-decoration:none;letter-spacing:1px;margin-left:6px;">DETAIL →</a>'
+    tags_html = ""
+    for g in r["genres"].split(", ")[:3]:
+        if g.strip():
+            tags_html += (
+                f'<span style="font-family:Space Mono,monospace;font-size:9px;'
+                f'padding:2px 7px;border-radius:3px;background:{acc_bg};'
+                f'color:{accent};border:0.5px solid {acc_brd};margin-right:4px;">'
+                f'{g.strip().upper()}</span>'
+            )
+
+    link_html = ""
+    if r["url"]:
+        link_html = (
+            f'<a href="{r["url"]}" target="_blank" style="font-family:Space Mono,monospace;'
+            f'font-size:9px;color:#444;text-decoration:none;letter-spacing:1px;margin-left:6px;">'
+            f'DETAILS →</a>'
+        )
+
+    artists_str = ""
+    if r["artists"] != "—":
+        short = r["artists"][:55] + ("…" if len(r["artists"]) > 55 else "")
+        artists_str = f"  ·  {short}"
 
     st.markdown(f"""
     <div style="background:#111;border:0.5px solid #1d1d1d;border-radius:8px;
-                padding:16px 16px 12px;margin-bottom:2px;border-top:2px solid {accent};">
+                padding:16px 16px 10px;margin-bottom:2px;border-top:2px solid {accent};">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="flex:1;min-width:0;">
           <div style="font-family:'Space Mono',monospace;font-size:9px;color:#555;letter-spacing:2px;margin-bottom:5px;">
-            {r["datum"]}{(" — " + r["cas"]) if r["cas"] != "—" else ""}
+            {r["date"]}{(" — " + r["time"]) if r["time"] != "—" else ""}
           </div>
           <div style="font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;
-                      color:#f0f0f0;line-height:1.2;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-            {r["nazev"]}
+                      color:#f0f0f0;line-height:1.2;margin-bottom:5px;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            {r["title"]}
           </div>
           <div style="font-size:12px;color:#555;margin-bottom:10px;">
-            {r["venue"]}{"  ·  " + r["interpreti"][:50] + ("…" if len(r["interpreti"]) > 50 else "") if r["interpreti"] != "—" else ""}
+            {r["venue"]}{artists_str}
           </div>
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
-            {zanry_tags}{odkaz_html}
+            {tags_html}{link_html}
           </div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:12px;flex-shrink:0;">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-left:12px;flex-shrink:0;">
           <span style="font-family:'Space Mono',monospace;font-size:9px;color:{accent};
-                       background:{acc_bg};border:0.5px solid {acc_brd};padding:3px 8px;border-radius:3px;">
-            {r["zdroj"]}
-          </span>
-          <span style="font-size:18px;color:{heart_color};">♥</span>
+                       background:{acc_bg};border:0.5px solid {acc_brd};
+                       padding:3px 8px;border-radius:3px;">{r["source"]}</span>
+          <span style="font-size:20px;color:{heart_c};line-height:1;">♥</span>
         </div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Tlačítko srdce — musí být Streamlit button (ne HTML)
-    btn_label = "♥ Odebrat z oblíbených" if oblibena else "♡ Přidat do oblíbených"
-    btn_key   = f"{'rm' if show_remove else 'fav'}_{eid}"
-    if st.button(btn_label, key=btn_key):
-        toggleOblibena(r)
-        st.rerun()
+    # Favorite button — plain st.button with on_click callback
+    btn_label = "♥  Remove from favorites" if fav else "♡  Save to favorites"
 
-    st.markdown("<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
-
-
-# ─── Tabs: Hledat / Oblíbené ─────────────────────────────────
-tab_hledat, tab_oblibene = st.tabs(["🔎  Hledat akce", f"♥  Oblíbené ({pocet_obl})"])
-
-# ══ TAB 1 — HLEDAT ══════════════════════════════════════════
-with tab_hledat:
-    if hledat:
-        if datum_od > datum_do:
-            st.markdown('<div style="color:#ff3cac;font-family:Space Mono,monospace;font-size:11px;">⚠ Datum Od musí být dříve než Do</div>', unsafe_allow_html=True)
+    def _toggle(eid=eid, r=r, fav=fav):
+        if fav:
+            remove_favorite(eid)
         else:
-            cfg = MESTA[mesto]
-            all_rows = []
+            add_favorite(eid, r)
 
-            col_ra, col_sk = st.columns(2)
-            with col_ra:
-                with st.spinner("Resident Advisor…"):
-                    ra_rows = parse_ra(fetch_ra(cfg["ra_area_id"], datum_od, datum_do))
-                    all_rows.extend(ra_rows)
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)} akcí</div>', unsafe_allow_html=True)
+    st.button(btn_label, key=f"{key_prefix}_{eid}", on_click=_toggle)
+    st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
-            with col_sk:
-                with st.spinner("Songkick…"):
-                    sk_rows = fetch_songkick(cfg["sk_city_slug"], datum_od, datum_do)
-                    all_rows.extend(sk_rows)
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)} akcí</div>', unsafe_allow_html=True)
 
-            all_rows = deduplicate(all_rows)
-            filtered = [r for r in all_rows if genre_matches(r, zanry)]
-            filtered.sort(key=lambda x: x["datum"])
+# ═══════════════════════════════════════════════════════════════
+#  SEARCH LOGIC
+# ═══════════════════════════════════════════════════════════════
 
-            if not filtered:
-                st.markdown('<div style="font-family:Space Mono,monospace;font-size:11px;color:#444;padding:2rem 0;">Žádné akce — zkus širší rozmezí nebo odeber filtr žánrů.</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div style="font-family:'Space Mono',monospace;font-size:10px;color:#555;letter-spacing:2px;
-                            margin:1.5rem 0 1rem;padding-bottom:1rem;border-bottom:0.5px solid #1d1d1d;">
-                    NALEZENO {len(filtered)} AKCÍ — {mesto.upper()} — {datum_od.strftime("%d.%m")} → {datum_do.strftime("%d.%m.%Y")}
-                </div>
-                """, unsafe_allow_html=True)
-
-                for r in filtered:
-                    render_event_card(r)
-
-                df_export = pd.DataFrame(filtered)
-                csv = df_export.to_csv(index=False).encode("utf-8")
-                st.download_button("EXPORT CSV", csv,
-                    file_name=f"rave_{mesto.lower()}_{datum_od}.csv", mime="text/csv")
+if search:
+    if date_from > date_to:
+        st.error("'From' date must be before 'To' date.")
     else:
+        cfg = CITIES[city]
+        all_rows = []
+
+        col_ra, col_sk = st.columns(2)
+        with col_ra:
+            with st.spinner("Resident Advisor…"):
+                ra_rows = parse_ra(fetch_ra(cfg["ra_area_id"], date_from, date_to))
+                all_rows.extend(ra_rows)
+            st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)} events</div>', unsafe_allow_html=True)
+
+        with col_sk:
+            with st.spinner("Songkick…"):
+                sk_rows = fetch_songkick(cfg["sk_city_slug"], date_from, date_to)
+                all_rows.extend(sk_rows)
+            st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)} events</div>', unsafe_allow_html=True)
+
+        all_rows = deduplicate(all_rows)
+        filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
+        filtered.sort(key=lambda x: x["date"])
+        st.session_state.results = filtered
+
+# ═══════════════════════════════════════════════════════════════
+#  TABS
+# ═══════════════════════════════════════════════════════════════
+
+fav_count = len(st.session_state.favorites)
+tab_search, tab_fav = st.tabs([
+    "🔎  Search events",
+    f"♥  Saved ({fav_count})",
+])
+
+# ── Tab 1: Results ───────────────────────────────────────────
+with tab_search:
+    results = st.session_state.results
+    if not results:
         st.markdown("""
         <div style="padding:4rem 0;text-align:center;">
           <div style="font-family:'Space Mono',monospace;font-size:48px;color:#1a1a1a;margin-bottom:1rem;">◈</div>
           <div style="font-family:'Space Mono',monospace;font-size:11px;color:#333;letter-spacing:2px;line-height:2.5;">
-            VYBER MĚSTO A DATUM<br>NASTAV ŽÁNRY<br>KLIKNI VYHLEDAT
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-# ══ TAB 2 — OBLÍBENÉ ═════════════════════════════════════════
-with tab_oblibene:
-    oblibene_list = list(st.session_state.oblibene.values())
-
-    if not oblibene_list:
-        st.markdown("""
-        <div style="padding:4rem 0;text-align:center;">
-          <div style="font-family:'Space Mono',monospace;font-size:48px;color:#1a1a1a;margin-bottom:1rem;">♥</div>
-          <div style="font-family:'Space Mono',monospace;font-size:11px;color:#333;letter-spacing:2px;line-height:2.5;">
-            ZATÍM ŽÁDNÉ OBLÍBENÉ<br>
-            KLIKNI ♡ U LIBOVOLNÉ AKCE
+            SELECT CITY AND DATE<br>SET GENRES<br>CLICK SEARCH
           </div>
         </div>
         """, unsafe_allow_html=True)
     else:
-        oblibene_list.sort(key=lambda x: x["datum"])
         st.markdown(f"""
-        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#ff3cac;letter-spacing:2px;
-                    margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:0.5px solid #1d1d1d;">
-            ♥ OBLÍBENÉ AKCE — {len(oblibene_list)} ULOŽENO
+        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#555;letter-spacing:2px;
+                    margin:1rem 0;padding-bottom:1rem;border-bottom:0.5px solid #1d1d1d;">
+            {len(results)} EVENTS FOUND — {city.upper()} — {date_from.strftime("%d %b")} → {date_to.strftime("%d %b %Y")}
         </div>
         """, unsafe_allow_html=True)
 
-        for r in oblibene_list:
-            render_event_card(r, show_remove=True)
+        for r in results:
+            render_card(r, key_prefix="s")
 
-        st.markdown("<div style='margin-top:1rem;'>", unsafe_allow_html=True)
-        df_obl = pd.DataFrame(oblibene_list)
-        csv_obl = df_obl.to_csv(index=False).encode("utf-8")
-        st.download_button("EXPORT OBLÍBENÝCH CSV", csv_obl,
-            file_name="rave_oblibene.csv", mime="text/csv")
+        df_exp = pd.DataFrame(results)
+        csv = df_exp.to_csv(index=False).encode("utf-8")
+        st.download_button("EXPORT CSV", csv,
+            file_name=f"rave_{city.lower()}_{date_from}.csv", mime="text/csv")
 
-        if st.button("VYMAZAT VŠE", key="clear_all"):
-            st.session_state.oblibene = {}
+# ── Tab 2: Favorites ─────────────────────────────────────────
+with tab_fav:
+    favs = list(st.session_state.favorites.values())
+
+    if not favs:
+        st.markdown("""
+        <div style="padding:4rem 0;text-align:center;">
+          <div style="font-family:'Space Mono',monospace;font-size:48px;color:#1a1a1a;margin-bottom:1rem;">♥</div>
+          <div style="font-family:'Space Mono',monospace;font-size:11px;color:#333;letter-spacing:2px;line-height:2.5;">
+            NO SAVED EVENTS YET<br>
+            CLICK ♡ ON ANY EVENT TO SAVE IT
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        favs.sort(key=lambda x: x["date"])
+        st.markdown(f"""
+        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#ff3cac;letter-spacing:2px;
+                    margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:0.5px solid #1d1d1d;">
+            ♥ SAVED EVENTS — {len(favs)} TOTAL
+        </div>
+        """, unsafe_allow_html=True)
+
+        for r in favs:
+            render_card(r, key_prefix="f")
+
+        df_fav = pd.DataFrame(favs)
+        csv_fav = df_fav.to_csv(index=False).encode("utf-8")
+        st.download_button("EXPORT SAVED CSV", csv_fav,
+            file_name="rave_saved.csv", mime="text/csv")
+
+        if st.button("CLEAR ALL SAVED", key="clear_all"):
+            st.session_state.favorites = {}
             st.rerun()
