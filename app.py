@@ -442,6 +442,15 @@ with st.sidebar:
 #  EVENT CARD
 # ═══════════════════════════════════════════════════════════════
 
+def esc(s: str) -> str:
+    """Escapuje HTML speciální znaky aby text nerozhodil markup."""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
 def render_card(r: dict, key_prefix: str):
     eid     = event_id(r)
     fav     = is_favorite(r)
@@ -450,6 +459,15 @@ def render_card(r: dict, key_prefix: str):
     acc_brd = "#3a4400" if r["source"] == "RA" else "#003040"
     heart_c = "#ff3cac" if fav else "#2a2a2a"
 
+    # Escapované hodnoty
+    title   = esc(r["title"])
+    venue   = esc(r["venue"])
+    source  = esc(r["source"])
+    city    = esc(r.get("city", ""))
+    date_s  = esc(r["date"])
+    time_s  = esc(r["time"]) if r["time"] != "—" else ""
+    url     = r["url"]
+
     tags_html = ""
     for g in r["genres"].split(", ")[:3]:
         if g.strip():
@@ -457,52 +475,41 @@ def render_card(r: dict, key_prefix: str):
                 f'<span style="font-family:Space Mono,monospace;font-size:9px;'
                 f'padding:2px 7px;border-radius:3px;background:{acc_bg};'
                 f'color:{accent};border:0.5px solid {acc_brd};margin-right:4px;">'
-                f'{g.strip().upper()}</span>'
+                f'{esc(g.strip()).upper()}</span>'
             )
 
     link_html = ""
-    if r["url"]:
+    if url:
         link_html = (
-            f'<a href="{r["url"]}" target="_blank" style="font-family:Space Mono,monospace;'
+            f'<a href="{esc(url)}" target="_blank" style="font-family:Space Mono,monospace;'
             f'font-size:9px;color:#444;text-decoration:none;letter-spacing:1px;margin-left:6px;">'
             f'DETAILS →</a>'
         )
 
+    artists_raw = r["artists"] if r["artists"] != "—" else ""
     artists_str = ""
-    if r["artists"] != "—":
-        short = r["artists"][:55] + ("…" if len(r["artists"]) > 55 else "")
+    if artists_raw:
+        short = esc(artists_raw[:55]) + ("…" if len(artists_raw) > 55 else "")
         artists_str = f"  ·  {short}"
 
-    st.markdown(f"""
-    <div style="background:#111;border:0.5px solid #1d1d1d;border-radius:8px;
-                padding:16px 16px 10px;margin-bottom:2px;border-top:2px solid {accent};">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-        <div style="flex:1;min-width:0;">
-          <div style="font-family:'Space Mono',monospace;font-size:9px;color:#555;letter-spacing:2px;margin-bottom:5px;">
-            {r["date"]}{(" — " + r["time"]) if r["time"] != "—" else ""}
-            {(" · " + r["city"].upper()) if r.get("city") else ""}
-          </div>
-          <div style="font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;
-                      color:#f0f0f0;line-height:1.2;margin-bottom:5px;
-                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-            {r["title"]}
-          </div>
-          <div style="font-size:12px;color:#555;margin-bottom:10px;">
-            {r["venue"]}{artists_str}
-          </div>
-          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
-            {tags_html}{link_html}
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-left:12px;flex-shrink:0;">
-          <span style="font-family:'Space Mono',monospace;font-size:9px;color:{accent};
-                       background:{acc_bg};border:0.5px solid {acc_brd};
-                       padding:3px 8px;border-radius:3px;">{r["source"]}</span>
-          <span style="font-size:20px;color:{heart_c};line-height:1;">♥</span>
-        </div>
-      </div>
+    time_part  = f" — {time_s}" if time_s else ""
+    city_part  = f" · {city.upper()}" if city else ""
+
+    html = f"""<div style="background:#111;border:0.5px solid #1d1d1d;border-radius:8px;padding:16px 16px 10px;margin-bottom:2px;border-top:2px solid {accent};">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+    <div style="flex:1;min-width:0;">
+      <div style="font-family:Space Mono,monospace;font-size:9px;color:#555;letter-spacing:2px;margin-bottom:5px;">{date_s}{time_part}{city_part}</div>
+      <div style="font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:700;color:#f0f0f0;line-height:1.2;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{title}</div>
+      <div style="font-size:12px;color:#555;margin-bottom:10px;">{venue}{artists_str}</div>
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">{tags_html}{link_html}</div>
     </div>
-    """, unsafe_allow_html=True)
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;margin-left:12px;flex-shrink:0;">
+      <span style="font-family:Space Mono,monospace;font-size:9px;color:{accent};background:{acc_bg};border:0.5px solid {acc_brd};padding:3px 8px;border-radius:3px;">{source}</span>
+      <span style="font-size:20px;color:{heart_c};line-height:1;">&#9829;</span>
+    </div>
+  </div>
+</div>"""
+    st.markdown(html, unsafe_allow_html=True)
 
     btn_label = "♥  Remove from favorites" if fav else "♡  Save to favorites"
 
