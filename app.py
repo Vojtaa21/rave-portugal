@@ -275,6 +275,113 @@ def fetch_songkick(metro_id: int, date_from: date, date_to: date) -> list[dict]:
     return rows
 
 
+def fetch_bandsintown(city_name: str, date_from: date, date_to: date) -> list[dict]:
+    """Bandsintown public REST API — events by city."""
+    rows = []
+    try:
+        url = (
+            f"https://rest.bandsintown.com/v4/events/search"
+            f"?app_id=test&location={requests.utils.quote(city_name)}"
+            f"&date={date_from.strftime('%Y-%m-%d')},{date_to.strftime('%Y-%m-%d')}"
+            f"&per_page=50"
+        )
+        r = requests.get(url, headers=SK_HEADERS, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        events = data if isinstance(data, list) else data.get("data", data.get("events", []))
+        for e in events:
+            if not isinstance(e, dict):
+                continue
+            dt = e.get("datetime", e.get("starts_at", ""))
+            d = dt[:10] if dt else "—"
+            t = dt[11:16] if len(dt) > 10 else "—"
+            venue = e.get("venue", {}) or {}
+            lineup = e.get("lineup", e.get("artists", []))
+            if isinstance(lineup, list):
+                artists = ", ".join(
+                    (a.get("name", "") if isinstance(a, dict) else str(a))
+                    for a in lineup
+                ) or "—"
+            else:
+                artists = "—"
+            rows.append({
+                "date":    d,
+                "time":    t,
+                "title":   e.get("title") or e.get("name") or artists or "—",
+                "venue":   venue.get("name", "—") if isinstance(venue, dict) else "—",
+                "artists": artists,
+                "genres":  "",
+                "source":  "Bandsintown",
+                "url":     e.get("url", ""),
+            })
+    except Exception:
+        pass
+    return rows
+
+
+def _parse_jsonld_events(soup, date_from: date, date_to: date, source: str) -> list[dict]:
+    """Sdílená logika pro parsování JSON-LD eventů (Songkick, Dice)."""
+    rows = []
+    for sc in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(sc.string or "")
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if item.get("@type") not in ("MusicEvent", "Event"):
+                    continue
+                start = item.get("startDate", "")
+                d = start[:10] if start else "—"
+                t = start[11:16] if len(start) > 10 else "—"
+                ev_date = date.fromisoformat(d) if d != "—" else None
+                if ev_date and not (date_from <= ev_date <= date_to):
+                    continue
+                location = item.get("location", {})
+                venue_name = location.get("name", "—") if isinstance(location, dict) else "—"
+                performers = item.get("performer", [])
+                if isinstance(performers, dict):
+                    performers = [performers]
+                artists = ", ".join(p.get("name", "") for p in performers) or "—"
+                rows.append({
+                    "date":    d,
+                    "time":    t,
+                    "title":   item.get("name", "—"),
+                    "venue":   venue_name,
+                    "artists": artists,
+                    "genres":  "",
+                    "source":  source,
+                    "url":     item.get("url", ""),
+                })
+        except Exception:
+            continue
+    return rows
+
+
+def fetch_dice(city_name: str, date_from: date, date_to: date) -> list[dict]:
+    """Scrape Dice.fm events pro dané město přes JSON-LD."""
+    rows = []
+    slug = city_name.lower().replace(" ", "-")
+    # Dice používá URL formát /browse/{city_slug}
+    urls_to_try = [
+        f"https://dice.fm/browse/{slug}",
+        f"https://dice.fm/venue/{slug}",
+        f"https://dice.fm/search?q={requests.utils.quote(city_name)}&type=events",
+    ]
+    for url in urls_to_try:
+        try:
+            r = requests.get(url, headers=SK_HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            found = _parse_jsonld_events(soup, date_from, date_to, "Dice")
+            rows.extend(found)
+            if found:
+                break
+        except Exception:
+            continue
+    return rows
+
+
 def genre_matches(row: dict, selected: list[str]) -> bool:
     if not selected:
         return True
@@ -432,7 +539,9 @@ with st.sidebar:
       <div style="font-family:'Space Mono',monospace;font-size:9px;color:#333;letter-spacing:1px;line-height:2.5;">
         DATA SOURCES<br>
         <span style="color:#d4ff00;">■</span> Resident Advisor<br>
-        <span style="color:#00e5ff;">■</span> Songkick
+        <span style="color:#00e5ff;">■</span> Songkick<br>
+        <span style="color:#ff7f00;">■</span> Bandsintown<br>
+        <span style="color:#bf5fff;">■</span> Dice.fm
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -454,9 +563,13 @@ def esc(s: str) -> str:
 def render_card(r: dict, key_prefix: str):
     eid     = event_id(r)
     fav     = is_favorite(r)
-    accent  = "#d4ff00" if r["source"] == "RA" else "#00e5ff"
-    acc_bg  = "#1a1e00" if r["source"] == "RA" else "#001a1e"
-    acc_brd = "#3a4400" if r["source"] == "RA" else "#003040"
+    source_colors = {
+        "RA":          ("#d4ff00", "#1a1e00", "#3a4400"),
+        "Songkick":    ("#00e5ff", "#001a1e", "#003040"),
+        "Bandsintown": ("#ff7f00", "#1e0f00", "#3a2000"),
+        "Dice":        ("#bf5fff", "#150020", "#2e0050"),
+    }
+    accent, acc_bg, acc_brd = source_colors.get(r["source"], ("#888", "#1a1a1a", "#333"))
     heart_c = "#ff3cac" if fav else "#2a2a2a"
 
     # Escapované hodnoty
@@ -542,23 +655,33 @@ if search:
             if not ra_id and not sk_id:
                 st.warning(f"Could not find '{city}' — skipping.")
                 continue
-            col_ra, col_sk = st.columns(2)
+            col_ra, col_sk, col_bit, col_dice = st.columns(4)
             with col_ra:
                 if ra_id:
-                    with st.spinner(f"RA — {city}…"):
+                    with st.spinner(f"RA…"):
                         ra_rows = parse_ra(fetch_ra(ra_id, date_from, date_to))
-                        for r in ra_rows:
-                            r["city"] = city
+                        for r in ra_rows: r["city"] = city
                         all_rows.extend(ra_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA {city} — {len(ra_rows)} events</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)}</div>', unsafe_allow_html=True)
             with col_sk:
                 if sk_id:
-                    with st.spinner(f"Songkick — {city}…"):
+                    with st.spinner(f"Songkick…"):
                         sk_rows = fetch_songkick(sk_id, date_from, date_to)
-                        for r in sk_rows:
-                            r["city"] = city
+                        for r in sk_rows: r["city"] = city
                         all_rows.extend(sk_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick {city} — {len(sk_rows)} events</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)}</div>', unsafe_allow_html=True)
+            with col_bit:
+                with st.spinner(f"Bandsintown…"):
+                    bit_rows = fetch_bandsintown(city, date_from, date_to)
+                    for r in bit_rows: r["city"] = city
+                    all_rows.extend(bit_rows)
+                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#ff7f00;letter-spacing:1px;">■ Bandsintown — {len(bit_rows)}</div>', unsafe_allow_html=True)
+            with col_dice:
+                with st.spinner(f"Dice…"):
+                    dice_rows = fetch_dice(city, date_from, date_to)
+                    for r in dice_rows: r["city"] = city
+                    all_rows.extend(dice_rows)
+                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#bf5fff;letter-spacing:1px;">■ Dice — {len(dice_rows)}</div>', unsafe_allow_html=True)
         all_rows = deduplicate(all_rows)
         filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
         filtered.sort(key=lambda x: (x["date"], x.get("city", "")))
