@@ -3,13 +3,9 @@ import requests
 from datetime import date, timedelta
 import pandas as pd
 
-# ═══════════════════════════════════════════════════════════════
-#  KONFIGURACE — area ID ověřená přímo z ra.co Console
-# ═══════════════════════════════════════════════════════════════
-
 MESTA = {
-    "Porto":   {"area_id": 364, "url_slug": "/pt/porto"},
-    "Lisabon": {"area_id": 53,  "url_slug": "/pt/lisbon"},
+    "Porto":   364,
+    "Lisabon": 53,
 }
 
 ZANRY_MOZNOSTI = ["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "House", "Trance"]
@@ -50,11 +46,7 @@ query GET_DEFAULT_EVENTS_OVERVIEW(
 }
 """
 
-# ═══════════════════════════════════════════════════════════════
-#  FUNKCE
-# ═══════════════════════════════════════════════════════════════
-
-def fetch_events(area_id: int, url_slug: str, date_from: date, date_to: date) -> list[dict]:
+def fetch_events(area_id: int, date_from: date, date_to: date) -> tuple[list[dict], int]:
     payload = {
         "query": EVENTS_QUERY,
         "variables": {
@@ -75,14 +67,14 @@ def fetch_events(area_id: int, url_slug: str, date_from: date, date_to: date) ->
         data = r.json()
         if "errors" in data:
             st.error(f"RA API chyba: {data['errors'][0].get('message', '?')}")
-            return []
+            return [], 0
         listings = data.get("data", {}).get("eventListings", {})
-        all_ev = [item["event"] for item in listings.get("data", [])]
-        # Bezpečnostní filtr — jen akce patřící danému městu
-        return [e for e in all_ev if url_slug in (e.get("contentUrl") or "")]
+        events = [item["event"] for item in listings.get("data", [])]
+        total = listings.get("totalResults", 0)
+        return events, total
     except requests.RequestException as e:
         st.error(f"❌ Chyba připojení: {e}")
-        return []
+        return [], 0
 
 
 def genre_matches(event_genres: list[str], selected: list[str]) -> bool:
@@ -114,16 +106,13 @@ def parse_events(raw: list[dict], selected_genres: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  UI
-# ═══════════════════════════════════════════════════════════════
+# ── UI ────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="🎛️ Rave Portugal", page_icon="🎛️", layout="wide")
 st.markdown("""
 <style>
     .rave-title { font-family:'Courier New',monospace; font-size:2.4rem; font-weight:700; letter-spacing:2px; color:#e0ff4f; margin-bottom:0; }
     .rave-sub   { font-size:0.95rem; color:#888; margin-top:2px; margin-bottom:1.5rem; font-family:'Courier New',monospace; }
-    .stDataFrame { border-radius:8px; overflow:hidden; }
     div.stButton > button { background:#e0ff4f; color:#111; font-weight:700; font-family:'Courier New',monospace; letter-spacing:1px; border:none; border-radius:6px; padding:0.55rem 2rem; width:100%; margin-top:0.5rem; }
     div.stButton > button:hover { background:#c8e600; }
     section[data-testid="stSidebar"] { background:#111; }
@@ -153,12 +142,18 @@ if hledat:
     if datum_od > datum_do:
         st.warning("⚠️ Datum 'Od' musí být dříve než datum 'Do'.")
     else:
-        cfg = MESTA[mesto]
+        area_id = MESTA[mesto]
         with st.spinner(f"Načítám akce v {mesto}…"):
-            raw = fetch_events(cfg["area_id"], cfg["url_slug"], datum_od, datum_do)
+            raw, total = fetch_events(area_id, datum_od, datum_do)
+
+        # Debug info
+        st.caption(f"ℹ️ RA API vrátilo {len(raw)} akcí (celkem v DB: {total}) pro area ID {area_id}")
+        if raw:
+            urls = [e.get("contentUrl", "—") for e in raw[:3]]
+            st.caption(f"Ukázka URL: {' | '.join(urls)}")
 
         if not raw:
-            st.info("Žádné akce nebyly nalezeny. Zkus širší datumové rozmezí.")
+            st.info("RA API nevrátilo žádné akce. Zkus širší datumové rozmezí.")
         else:
             df = parse_events(raw, zanry)
             if df.empty:
