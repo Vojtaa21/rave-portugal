@@ -662,7 +662,7 @@ with st.sidebar:
     cities_sel = st.multiselect(
         "Cities",
         options=CITIES_LIST,
-        default=["Porto"],
+        default=[],
         placeholder="Select one or more cities…",
     )
 
@@ -672,7 +672,7 @@ with st.sidebar:
 
     genres_sel = st.multiselect(
         "Genres", options=GENRES,
-        default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "Gabber", "Frenchcore"],
+        default=[],
         placeholder="All genres",
     )
 
