@@ -822,47 +822,21 @@ if search:
             if not ra_id and not sk_id:
                 st.warning(f"Could not find '{city}' — skipping.")
                 continue
-            col_ra, col_sk, col_bit, col_dice = st.columns(4)
-            with col_ra:
+            with st.spinner(f"Searching {city}…"):
                 if ra_id:
-                    with st.spinner(f"RA…"):
-                        ra_rows = parse_ra(fetch_ra(ra_id, date_from, date_to))
-                        for r in ra_rows: r["city"] = city
-                        all_rows.extend(ra_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)}</div>', unsafe_allow_html=True)
-            with col_sk:
+                    for r in parse_ra(fetch_ra(ra_id, date_from, date_to)):
+                        r["city"] = city; all_rows.append(r)
                 if sk_id:
-                    with st.spinner(f"Songkick…"):
-                        sk_rows = fetch_songkick(sk_id, date_from, date_to)
-                        for r in sk_rows: r["city"] = city
-                        all_rows.extend(sk_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)}</div>', unsafe_allow_html=True)
-            with col_bit:
-                with st.spinner(f"Bandsintown…"):
-                    bit_rows = fetch_bandsintown(city, date_from, date_to)
-                    for r in bit_rows: r["city"] = city
-                    all_rows.extend(bit_rows)
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#ff7f00;letter-spacing:1px;">■ Bandsintown — {len(bit_rows)}</div>', unsafe_allow_html=True)
-            with col_dice:
-                with st.spinner(f"Dice…"):
-                    dice_rows = fetch_dice(city, date_from, date_to)
-                    for r in dice_rows: r["city"] = city
-                    all_rows.extend(dice_rows)
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#bf5fff;letter-spacing:1px;">■ Dice — {len(dice_rows)}</div>', unsafe_allow_html=True)
-            col_sg, col_tm = st.columns(2)
-            with col_sg:
-                with st.spinner(f"Shotgun…"):
-                    sg_rows = fetch_shotgun(city, date_from, date_to)
-                    for r in sg_rows: r["city"] = city
-                    all_rows.extend(sg_rows)
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#ff2d55;letter-spacing:1px;">■ Shotgun — {len(sg_rows)}</div>', unsafe_allow_html=True)
-            with col_tm:
-                with st.spinner(f"Ticketmaster…"):
-                    tm_rows = fetch_ticketmaster(city, date_from, date_to, TM_API_KEY)
-                    for r in tm_rows: r["city"] = city
-                    all_rows.extend(tm_rows)
-                label = f"{len(tm_rows)}" if TM_API_KEY != "YOUR_TM_KEY" else "no key"
-                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#026cdf;letter-spacing:1px;">■ Ticketmaster — {label}</div>', unsafe_allow_html=True)
+                    for r in fetch_songkick(sk_id, date_from, date_to):
+                        r["city"] = city; all_rows.append(r)
+                for r in fetch_bandsintown(city, date_from, date_to):
+                    r["city"] = city; all_rows.append(r)
+                for r in fetch_dice(city, date_from, date_to):
+                    r["city"] = city; all_rows.append(r)
+                for r in fetch_shotgun(city, date_from, date_to):
+                    r["city"] = city; all_rows.append(r)
+                for r in fetch_ticketmaster(city, date_from, date_to, TM_API_KEY):
+                    r["city"] = city; all_rows.append(r)
         all_rows = deduplicate(all_rows)
         filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
         filtered.sort(key=lambda x: (x["date"], x.get("city", "")))
