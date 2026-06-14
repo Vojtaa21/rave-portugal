@@ -275,13 +275,6 @@ def genre_matches(row: dict, selected: list[str]) -> bool:
     return any(s.lower() in text for s in selected)
 
 
-def artist_matches(row: dict, query: str) -> bool:
-    if not query.strip():
-        return True
-    q = query.strip().lower()
-    return (q in row["artists"].lower() or
-            q in row["title"].lower())
-
 
 def deduplicate(rows: list[dict]) -> list[dict]:
     seen = set()
@@ -387,15 +380,12 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Dropdown + možnost přidat vlastní město
-    city_options = CITIES_LIST + ["+ Add city…"]
-    city_select = st.selectbox("City", options=city_options)
-
-    if city_select == "+ Add city…":
-        custom_city = st.text_input("Enter city name", placeholder="e.g. Berlin, Amsterdam…")
-        city = custom_city.strip() if custom_city.strip() else None
-    else:
-        city = city_select
+    cities_sel = st.multiselect(
+        "Cities",
+        options=CITIES_LIST,
+        default=["Porto"],
+        placeholder="Select one or more cities…",
+    )
 
     c1, c2 = st.columns(2)
     with c1: date_from = st.date_input("From", value=date.today())
@@ -407,10 +397,6 @@ with st.sidebar:
         placeholder="All genres",
     )
 
-    artist_filter = st.text_input(
-        "Artist",
-        placeholder="e.g. Klangkuenstler, Paula Temple…",
-    )
 
     st.markdown('<div class="search-btn">', unsafe_allow_html=True)
     search = st.button("SEARCH EVENTS")
@@ -487,6 +473,7 @@ def render_card(r: dict, key_prefix: str):
         <div style="flex:1;min-width:0;">
           <div style="font-family:'Space Mono',monospace;font-size:9px;color:#555;letter-spacing:2px;margin-bottom:5px;">
             {r["date"]}{(" — " + r["time"]) if r["time"] != "—" else ""}
+            {(" · " + r["city"].upper()) if r.get("city") else ""}
           </div>
           <div style="font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;
                       color:#f0f0f0;line-height:1.2;margin-bottom:5px;
@@ -527,52 +514,41 @@ def render_card(r: dict, key_prefix: str):
 # ═══════════════════════════════════════════════════════════════
 
 if search:
-    if not city:
-        st.warning("Please enter a city name.")
+    if not cities_sel:
+        st.warning("Please select at least one city.")
     elif date_from > date_to:
         st.error("'From' date must be before 'To' date.")
     else:
-        # Auto-lookup IDs
-        with st.spinner(f"Looking up city IDs for {city}…"):
-            ids = get_city_ids(city)
-
-        ra_id = ids.get("ra_id")
-        sk_id = ids.get("sk_id")
-
-        if not ra_id and not sk_id:
-            st.error(f"Could not find '{city}' in RA or Songkick. Try a different spelling.")
-        else:
-            id_info = []
-            if ra_id: id_info.append(f"RA: {ra_id}")
-            if sk_id: id_info.append(f"Songkick: {sk_id}")
-            st.caption(f"City IDs — {' · '.join(id_info)}")
-
-            all_rows = []
+        all_rows = []
+        for city in cities_sel:
+            with st.spinner(f"Looking up {city}…"):
+                ids = get_city_ids(city)
+            ra_id = ids.get("ra_id")
+            sk_id = ids.get("sk_id")
+            if not ra_id and not sk_id:
+                st.warning(f"Could not find '{city}' — skipping.")
+                continue
             col_ra, col_sk = st.columns(2)
-
             with col_ra:
                 if ra_id:
-                    with st.spinner("Resident Advisor…"):
+                    with st.spinner(f"RA — {city}…"):
                         ra_rows = parse_ra(fetch_ra(ra_id, date_from, date_to))
+                        for r in ra_rows:
+                            r["city"] = city
                         all_rows.extend(ra_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA — {len(ra_rows)} events</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="font-family:Space Mono,monospace;font-size:9px;color:#333;">■ RA — city not found</div>', unsafe_allow_html=True)
-
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#d4ff00;letter-spacing:1px;">■ RA {city} — {len(ra_rows)} events</div>', unsafe_allow_html=True)
             with col_sk:
                 if sk_id:
-                    with st.spinner("Songkick…"):
+                    with st.spinner(f"Songkick — {city}…"):
                         sk_rows = fetch_songkick(sk_id, date_from, date_to)
+                        for r in sk_rows:
+                            r["city"] = city
                         all_rows.extend(sk_rows)
-                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick — {len(sk_rows)} events</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="font-family:Space Mono,monospace;font-size:9px;color:#333;">■ Songkick — city not found</div>', unsafe_allow_html=True)
-
-            all_rows = deduplicate(all_rows)
-            filtered = [r for r in all_rows
-                        if genre_matches(r, genres_sel) and artist_matches(r, artist_filter)]
-            filtered.sort(key=lambda x: x["date"])
-            st.session_state.results = filtered
+                    st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#00e5ff;letter-spacing:1px;">■ Songkick {city} — {len(sk_rows)} events</div>', unsafe_allow_html=True)
+        all_rows = deduplicate(all_rows)
+        filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
+        filtered.sort(key=lambda x: (x["date"], x.get("city", "")))
+        st.session_state.results = filtered
 
 
 # ═══════════════════════════════════════════════════════════════
