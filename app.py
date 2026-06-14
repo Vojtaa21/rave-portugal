@@ -13,6 +13,8 @@ import hashlib
 CITIES = {
     "Porto":   {"ra_area_id": 364, "sk_city_slug": "porto"},
     "Lisbon":  {"ra_area_id": 53,  "sk_city_slug": "lisbon"},
+    "Prague":  {"ra_area_id": 451, "sk_city_slug": "prague"},
+    "Brno":    {"ra_area_id": 676, "sk_city_slug": "brno"},
 }
 
 GENRES = [
@@ -131,7 +133,7 @@ def parse_ra(events: list[dict]) -> list[dict]:
     return rows
 
 
-SK_METRO = {"porto": 28758, "lisbon": 28863}
+SK_METRO = {"porto": 28758, "lisbon": 28863, "prague": 31302, "brno": 31303}
 
 def fetch_songkick(city_slug: str, date_from: date, date_to: date) -> list[dict]:
     rows = []
