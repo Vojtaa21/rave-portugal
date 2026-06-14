@@ -12,6 +12,13 @@ import hashlib
 
 CITIES_LIST = [
     "Porto", "Lisbon", "Prague", "Brno",
+    "Berlin", "Amsterdam", "Barcelona", "Madrid",
+    "London", "Paris", "Vienna", "Budapest",
+    "Warsaw", "Bratislava", "Zurich", "Brussels",
+    "Milan", "Rome", "Athens", "Istanbul",
+    "New York", "Los Angeles", "Chicago", "Miami",
+    "São Paulo", "Buenos Aires", "Bogotá",
+    "Tokyo", "Seoul", "Melbourne", "Sydney",
 ]
 
 GENRES = [
