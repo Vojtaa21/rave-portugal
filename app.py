@@ -8,12 +8,21 @@ MESTA = {
     "Lisabon": 53,
 }
 
+# Žánry jsou seřazeny hierarchicky (hlavní → subžánry)
 ZANRY_MOZNOSTI = [
-    "Techno", "Hard Techno", "Drum & Bass", "Psytrance",
-    "House", "Deep House", "Tech House", "Trance",
+    # Techno
+    "Techno", "Acid Techno", "Hard Techno", "Industrial Techno",
+    # Drum & Bass
+    "Drum & Bass", "Jump Up", "Liquid Funk", "Neurofunk",
+    # Trance
+    "Trance", "Psytrance", "Uplifting Trance",
+    # House
+    "House", "Acid House", "Deep House", "Tech House",
+    # Hardcore
+    "Hardcore", "Gabber", "Frenchcore",
+    # Ostatní
     "Electronic", "Electronica", "Ambient", "Industrial",
-    "Hardcore", "Gabber", "Breakbeat", "Jungle",
-    "Acid", "Minimal", "EBM", "Noise",
+    "Breakbeat", "Jungle", "Minimal", "EBM", "Noise",
 ]
 
 RA_URL = "https://ra.co/graphql"
@@ -138,7 +147,7 @@ with st.sidebar:
     with c2: datum_do = st.date_input("Do", value=date.today() + timedelta(days=30))
     zanry = st.multiselect(
         "Žánry (nechej prázdné = vše)", options=ZANRY_MOZNOSTI,
-        default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance"],
+        default=["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "Gabber", "Frenchcore"],
     )
     hledat = st.button("🔎  Vyhledat akce")
     st.markdown("---")
