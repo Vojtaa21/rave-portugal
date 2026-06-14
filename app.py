@@ -33,7 +33,7 @@ GENRES = [
 
 # Ticketmaster API klíč — zaregistruj se ZDARMA na developer.ticketmaster.com
 # Po registraci vlož svůj klíč sem:
-TM_API_KEY = "S5YU9lCzkJNAcBFf8k8VGCMYCI2VUFew"
+TM_API_KEY = st.secrets.get("TM_API_KEY", "")
 
 RA_URL = "https://ra.co/graphql"
 RA_HEADERS = {
