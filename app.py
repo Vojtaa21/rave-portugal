@@ -8,7 +8,13 @@ MESTA = {
     "Lisabon": 53,
 }
 
-ZANRY_MOZNOSTI = ["Techno", "Hard Techno", "Drum & Bass", "Psytrance", "House", "Trance"]
+ZANRY_MOZNOSTI = [
+    "Techno", "Hard Techno", "Drum & Bass", "Psytrance",
+    "House", "Deep House", "Tech House", "Trance",
+    "Electronic", "Electronica", "Ambient", "Industrial",
+    "Hardcore", "Gabber", "Breakbeat", "Jungle",
+    "Acid", "Minimal", "EBM", "Noise",
+]
 
 RA_URL = "https://ra.co/graphql"
 RA_HEADERS = {
