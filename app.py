@@ -631,9 +631,11 @@ st.markdown(f"""
     <div style="font-family:'Space Mono',monospace;font-size:10px;color:#d4ff00;letter-spacing:3px;margin-bottom:6px;">
       UNDERGROUND ELECTRONIC MUSIC
     </div>
-    <div style="font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;color:#f0f0f0;letter-spacing:-1.5px;line-height:1;">
-      RAVE <span style="color:#d4ff00;">FINDER</span>
-    </div>
+    <a href="?reset=1" style="text-decoration:none;">
+      <div style="font-family:'Space Grotesk',sans-serif;font-size:42px;font-weight:700;color:#f0f0f0;letter-spacing:-1.5px;line-height:1;cursor:pointer;">
+        RAVE <span style="color:#d4ff00;">FINDER</span>
+      </div>
+    </a>
     <div style="font-family:'Space Mono',monospace;font-size:11px;color:#444;margin-top:6px;letter-spacing:1px;">
       Resident Advisor + Songkick — auto city lookup
     </div>
