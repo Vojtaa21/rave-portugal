@@ -33,7 +33,7 @@ GENRES = [
 
 # Ticketmaster API klíč — zaregistruj se ZDARMA na developer.ticketmaster.com
 # Po registraci vlož svůj klíč sem:
-TM_API_KEY = st.secrets.get("TM_API_KEY", "")
+TM_API_KEY = "S5YU9lCzkJNAcBFf8k8VGCMYCI2VUFew"
 
 RA_URL = "https://ra.co/graphql"
 RA_HEADERS = {
@@ -280,39 +280,38 @@ def fetch_songkick(metro_id: int, date_from: date, date_to: date) -> list[dict]:
 
 
 def fetch_bandsintown(city_name: str, date_from: date, date_to: date) -> list[dict]:
-    """Bandsintown public REST API — events by city."""
+    """Bandsintown v3 API — hledá akce podle města přes location search."""
     rows = []
     try:
+        # Bandsintown v3: search events by location
         url = (
-            f"https://rest.bandsintown.com/v4/events/search"
-            f"?app_id=test&location={requests.utils.quote(city_name)}"
-            f"&date={date_from.strftime('%Y-%m-%d')},{date_to.strftime('%Y-%m-%d')}"
+            f"https://rest.bandsintown.com/v3/events/search"
+            f"?app_id=javahipster"
+            f"&location={requests.utils.quote(city_name)}"
+            f"&start_date={date_from.strftime('%Y-%m-%d')}"
+            f"&end_date={date_to.strftime('%Y-%m-%d')}"
             f"&per_page=50"
+            f"&page=1"
         )
         r = requests.get(url, headers=SK_HEADERS, timeout=15)
         if r.status_code != 200:
             return []
-        data = r.json()
-        events = data if isinstance(data, list) else data.get("data", data.get("events", []))
+        events = r.json()
+        if not isinstance(events, list):
+            return []
         for e in events:
             if not isinstance(e, dict):
                 continue
-            dt = e.get("datetime", e.get("starts_at", ""))
+            dt = e.get("datetime", "")
             d = dt[:10] if dt else "—"
             t = dt[11:16] if len(dt) > 10 else "—"
             venue = e.get("venue", {}) or {}
-            lineup = e.get("lineup", e.get("artists", []))
-            if isinstance(lineup, list):
-                artists = ", ".join(
-                    (a.get("name", "") if isinstance(a, dict) else str(a))
-                    for a in lineup
-                ) or "—"
-            else:
-                artists = "—"
+            lineup = e.get("lineup", [])
+            artists = ", ".join(lineup) if lineup else "—"
             rows.append({
                 "date":    d,
                 "time":    t,
-                "title":   e.get("title") or e.get("name") or artists or "—",
+                "title":   e.get("title") or artists or "—",
                 "venue":   venue.get("name", "—") if isinstance(venue, dict) else "—",
                 "artists": artists,
                 "genres":  "",
@@ -362,50 +361,137 @@ def _parse_jsonld_events(soup, date_from: date, date_to: date, source: str) -> l
 
 
 def fetch_dice(city_name: str, date_from: date, date_to: date) -> list[dict]:
-    """Scrape Dice.fm events pro dané město přes JSON-LD."""
+    """Dice.fm internal API — events by city."""
     rows = []
-    slug = city_name.lower().replace(" ", "-")
-    # Dice používá URL formát /browse/{city_slug}
-    urls_to_try = [
-        f"https://dice.fm/browse/{slug}",
-        f"https://dice.fm/venue/{slug}",
-        f"https://dice.fm/search?q={requests.utils.quote(city_name)}&type=events",
-    ]
-    for url in urls_to_try:
-        try:
-            r = requests.get(url, headers=SK_HEADERS, timeout=15)
-            if r.status_code != 200:
-                continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            found = _parse_jsonld_events(soup, date_from, date_to, "Dice")
-            rows.extend(found)
-            if found:
-                break
-        except Exception:
-            continue
+    try:
+        # Dice má interní API které vrací JSON
+        headers = {
+            **SK_HEADERS,
+            "Accept": "application/json",
+            "x-api-key": "dice",
+        }
+        url = (
+            f"https://api.dice.fm/api/v4/events"
+            f"?page[size]=50"
+            f"&filter[location_name]={requests.utils.quote(city_name)}"
+            f"&filter[from]={date_from.strftime('%Y-%m-%d')}T00:00:00"
+            f"&filter[to]={date_to.strftime('%Y-%m-%d')}T23:59:59"
+        )
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        events = data.get("data", []) if isinstance(data, dict) else []
+        for e in events:
+            attrs = e.get("attributes", e) if isinstance(e, dict) else {}
+            dt = attrs.get("date", attrs.get("start_time", ""))
+            d = dt[:10] if dt else "—"
+            t = dt[11:16] if len(dt) > 10 else "—"
+            venue = attrs.get("venue", {}) or {}
+            lineup = attrs.get("lineup_details", attrs.get("lineup", []))
+            if isinstance(lineup, list):
+                artists = ", ".join(
+                    (a.get("name", "") if isinstance(a, dict) else str(a))
+                    for a in lineup[:5]
+                ) or "—"
+            else:
+                artists = "—"
+            rows.append({
+                "date":    d,
+                "time":    t,
+                "title":   attrs.get("name", attrs.get("title", "—")),
+                "venue":   venue.get("name", "—") if isinstance(venue, dict) else "—",
+                "artists": artists,
+                "genres":  "",
+                "source":  "Dice",
+                "url":     f"https://dice.fm/event/{e.get('id', '')}" if e.get("id") else "",
+            })
+    except Exception:
+        pass
     return rows
 
 
 
 def fetch_shotgun(city_name: str, date_from: date, date_to: date) -> list[dict]:
-    """Scrape Shotgun.live events — specializovaná elektronická hudba, underground."""
+    """Shotgun.live internal API — underground elektronika."""
     rows = []
-    slug = city_name.lower().replace(" ", "-")
-    urls_to_try = [
-        f"https://shotgun.live/en/cities/{slug}",
-        f"https://shotgun.live/en/cities/{slug}/techno",
-        f"https://shotgun.live/en/cities/{slug}/electronic",
-    ]
-    for url in urls_to_try:
-        try:
-            r = requests.get(url, headers=SK_HEADERS, timeout=15)
-            if r.status_code != 200:
-                continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            found = _parse_jsonld_events(soup, date_from, date_to, "Shotgun")
-            rows.extend(found)
-        except Exception:
-            continue
+    try:
+        headers = {
+            **SK_HEADERS,
+            "Accept": "application/json",
+            "Origin": "https://shotgun.live",
+            "Referer": "https://shotgun.live/",
+        }
+        url = (
+            f"https://shotgun.live/api/v1/events"
+            f"?city={requests.utils.quote(city_name)}"
+            f"&from={date_from.strftime('%Y-%m-%d')}"
+            f"&to={date_to.strftime('%Y-%m-%d')}"
+            f"&per_page=50"
+        )
+        r = requests.get(url, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            events = data.get("events", data) if isinstance(data, dict) else data
+            if isinstance(events, list):
+                for e in events:
+                    if not isinstance(e, dict):
+                        continue
+                    dt = e.get("starts_at", e.get("date", ""))
+                    d = dt[:10] if dt else "—"
+                    t = dt[11:16] if len(dt) > 10 else "—"
+                    venue = e.get("venue", e.get("place", {})) or {}
+                    artists_list = e.get("artists", e.get("lineup", []))
+                    artists = ", ".join(
+                        (a.get("name", "") if isinstance(a, dict) else str(a))
+                        for a in artists_list[:5]
+                    ) if artists_list else "—"
+                    rows.append({
+                        "date":    d,
+                        "time":    t,
+                        "title":   e.get("name", e.get("title", "—")),
+                        "venue":   venue.get("name", "—") if isinstance(venue, dict) else "—",
+                        "artists": artists,
+                        "genres":  ", ".join(e.get("tags", e.get("genres", []))[:3]),
+                        "source":  "Shotgun",
+                        "url":     e.get("url", e.get("shotgun_url", "")),
+                    })
+                return rows
+        # Fallback: zkus GraphQL endpoint
+        gql_url = "https://shotgun.live/api/graphql"
+        payload = {
+            "query": """query Events($city: String!, $from: String!, $to: String!) {
+                events(city: $city, dateFrom: $from, dateTo: $to, first: 50) {
+                    nodes { id name startsAt venue { name } artists { name } tags url }
+                }
+            }""",
+            "variables": {
+                "city": city_name,
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+            }
+        }
+        r2 = requests.post(gql_url, headers={**headers, "Content-Type": "application/json"},
+                           json=payload, timeout=15)
+        if r2.status_code == 200:
+            nodes = (r2.json().get("data", {}).get("events", {}) or {}).get("nodes", [])
+            for e in nodes:
+                dt = e.get("startsAt", "")
+                d = dt[:10] if dt else "—"
+                t = dt[11:16] if len(dt) > 10 else "—"
+                venue = e.get("venue", {}) or {}
+                artists = ", ".join(a.get("name", "") for a in e.get("artists", [])[:5]) or "—"
+                rows.append({
+                    "date": d, "time": t,
+                    "title": e.get("name", "—"),
+                    "venue": venue.get("name", "—") if isinstance(venue, dict) else "—",
+                    "artists": artists,
+                    "genres": ", ".join(e.get("tags", [])[:3]),
+                    "source": "Shotgun",
+                    "url": e.get("url", ""),
+                })
+    except Exception:
+        pass
     return rows
 
 
@@ -424,6 +510,7 @@ def fetch_ticketmaster(city_name: str, date_from: date, date_to: date, api_key: 
             f"&endDateTime={date_to.strftime('%Y-%m-%d')}T23:59:59Z"
             f"&size=50"
             f"&sort=date,asc"
+            f"&locale=*"
         )
         r = requests.get(url, headers=SK_HEADERS, timeout=15)
         r.raise_for_status()
