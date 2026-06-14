@@ -31,6 +31,10 @@ GENRES = [
     "Breakbeat", "Jungle", "Minimal", "EBM", "Noise",
 ]
 
+# Ticketmaster API klíč — zaregistruj se ZDARMA na developer.ticketmaster.com
+# Po registraci vlož svůj klíč sem:
+TM_API_KEY = "S5YU9lCzkJNAcBFf8k8VGCMYCI2VUFew"
+
 RA_URL = "https://ra.co/graphql"
 RA_HEADERS = {
     "Content-Type": "application/json",
@@ -382,6 +386,78 @@ def fetch_dice(city_name: str, date_from: date, date_to: date) -> list[dict]:
     return rows
 
 
+
+def fetch_shotgun(city_name: str, date_from: date, date_to: date) -> list[dict]:
+    """Scrape Shotgun.live events — specializovaná elektronická hudba, underground."""
+    rows = []
+    slug = city_name.lower().replace(" ", "-")
+    urls_to_try = [
+        f"https://shotgun.live/en/cities/{slug}",
+        f"https://shotgun.live/en/cities/{slug}/techno",
+        f"https://shotgun.live/en/cities/{slug}/electronic",
+    ]
+    for url in urls_to_try:
+        try:
+            r = requests.get(url, headers=SK_HEADERS, timeout=15)
+            if r.status_code != 200:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            found = _parse_jsonld_events(soup, date_from, date_to, "Shotgun")
+            rows.extend(found)
+        except Exception:
+            continue
+    return rows
+
+
+def fetch_ticketmaster(city_name: str, date_from: date, date_to: date, api_key: str) -> list[dict]:
+    """Ticketmaster Discovery API — velké akce a arény. Vyžaduje API klíč."""
+    if not api_key or api_key == "YOUR_TM_KEY":
+        return []
+    rows = []
+    try:
+        url = (
+            f"https://app.ticketmaster.com/discovery/v2/events.json"
+            f"?apikey={api_key}"
+            f"&city={requests.utils.quote(city_name)}"
+            f"&classificationName=music"
+            f"&startDateTime={date_from.strftime('%Y-%m-%d')}T00:00:00Z"
+            f"&endDateTime={date_to.strftime('%Y-%m-%d')}T23:59:59Z"
+            f"&size=50"
+            f"&sort=date,asc"
+        )
+        r = requests.get(url, headers=SK_HEADERS, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        events = (data.get("_embedded") or {}).get("events", [])
+        for e in events:
+            dates = e.get("dates", {}).get("start", {})
+            d = dates.get("localDate", "—")
+            t = dates.get("localTime", "—")[:5] if dates.get("localTime") else "—"
+            venues = (e.get("_embedded") or {}).get("venues", [{}])
+            venue_name = venues[0].get("name", "—") if venues else "—"
+            attractions = (e.get("_embedded") or {}).get("attractions", [])
+            artists = ", ".join(a.get("name", "") for a in attractions) or "—"
+            genres_list = []
+            for cls in e.get("classifications", []):
+                if cls.get("genre", {}).get("name") not in (None, "Undefined"):
+                    genres_list.append(cls["genre"]["name"])
+                if cls.get("subGenre", {}).get("name") not in (None, "Undefined"):
+                    genres_list.append(cls["subGenre"]["name"])
+            rows.append({
+                "date":    d,
+                "time":    t,
+                "title":   e.get("name", "—"),
+                "venue":   venue_name,
+                "artists": artists,
+                "genres":  ", ".join(set(genres_list)),
+                "source":  "Ticketmaster",
+                "url":     e.get("url", ""),
+            })
+    except Exception:
+        pass
+    return rows
+
+
 def genre_matches(row: dict, selected: list[str]) -> bool:
     if not selected:
         return True
@@ -541,7 +617,9 @@ with st.sidebar:
         <span style="color:#d4ff00;">■</span> Resident Advisor<br>
         <span style="color:#00e5ff;">■</span> Songkick<br>
         <span style="color:#ff7f00;">■</span> Bandsintown<br>
-        <span style="color:#bf5fff;">■</span> Dice.fm
+        <span style="color:#bf5fff;">■</span> Dice.fm<br>
+        <span style="color:#ff2d55;">■</span> Shotgun.live<br>
+        <span style="color:#026cdf;">■</span> Ticketmaster*
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -564,10 +642,12 @@ def render_card(r: dict, key_prefix: str):
     eid     = event_id(r)
     fav     = is_favorite(r)
     source_colors = {
-        "RA":          ("#d4ff00", "#1a1e00", "#3a4400"),
-        "Songkick":    ("#00e5ff", "#001a1e", "#003040"),
-        "Bandsintown": ("#ff7f00", "#1e0f00", "#3a2000"),
-        "Dice":        ("#bf5fff", "#150020", "#2e0050"),
+        "RA":           ("#d4ff00", "#1a1e00", "#3a4400"),
+        "Songkick":     ("#00e5ff", "#001a1e", "#003040"),
+        "Bandsintown":  ("#ff7f00", "#1e0f00", "#3a2000"),
+        "Dice":         ("#bf5fff", "#150020", "#2e0050"),
+        "Shotgun":      ("#ff2d55", "#200008", "#4a0015"),
+        "Ticketmaster": ("#026cdf", "#001030", "#002060"),
     }
     accent, acc_bg, acc_brd = source_colors.get(r["source"], ("#888", "#1a1a1a", "#333"))
     heart_c = "#ff3cac" if fav else "#2a2a2a"
@@ -682,6 +762,20 @@ if search:
                     for r in dice_rows: r["city"] = city
                     all_rows.extend(dice_rows)
                 st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#bf5fff;letter-spacing:1px;">■ Dice — {len(dice_rows)}</div>', unsafe_allow_html=True)
+            col_sg, col_tm = st.columns(2)
+            with col_sg:
+                with st.spinner(f"Shotgun…"):
+                    sg_rows = fetch_shotgun(city, date_from, date_to)
+                    for r in sg_rows: r["city"] = city
+                    all_rows.extend(sg_rows)
+                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#ff2d55;letter-spacing:1px;">■ Shotgun — {len(sg_rows)}</div>', unsafe_allow_html=True)
+            with col_tm:
+                with st.spinner(f"Ticketmaster…"):
+                    tm_rows = fetch_ticketmaster(city, date_from, date_to, TM_API_KEY)
+                    for r in tm_rows: r["city"] = city
+                    all_rows.extend(tm_rows)
+                label = f"{len(tm_rows)}" if TM_API_KEY != "YOUR_TM_KEY" else "no key"
+                st.markdown(f'<div style="font-family:Space Mono,monospace;font-size:9px;color:#026cdf;letter-spacing:1px;">■ Ticketmaster — {label}</div>', unsafe_allow_html=True)
         all_rows = deduplicate(all_rows)
         filtered = [r for r in all_rows if genre_matches(r, genres_sel)]
         filtered.sort(key=lambda x: (x["date"], x.get("city", "")))
